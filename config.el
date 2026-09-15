@@ -11,8 +11,16 @@
 
 (package-initialize)
 
-(unless package-archive-contents
-  (package-refresh-contents))
+;; Don't block startup forever if ELPA is unreachable or slow. If the
+;; refresh hangs, we keep going and let `use-package`/`package-install`
+;; retry later on demand instead.
+(when (null package-archive-contents)
+  (condition-case err
+      (with-timeout (15
+                     (message "Timed out contacting ELPA; continuing without package refresh."))
+        (package-refresh-contents))
+    (error
+     (message "Package refresh skipped: %s" err))))
 
 (require 'use-package)
 (setq use-package-always-ensure t
@@ -73,3 +81,41 @@
 
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 (require 'albin-timeclock)
+
+(use-package org-roam
+  :ensure t
+  :after org
+  :init
+  (setq org-roam-v2-ack t
+        org-roam-directory (file-truename "~/org-roam")
+        org-roam-completion-everywhere t
+        org-roam-capture-templates
+        '(("d" "default" plain
+           "%?\n\n%a"
+           :if-new (file+head "%<%Y-%m-%d>-%<%H%M%S>-${slug}.org"
+                              "#+title: ${title}\n#+filetags: \n")
+           :unnarrowed t)))
+  :bind ("C-c n f" . org-roam-node-find)
+  :bind ("C-c n i" . org-roam-node-insert)
+  :bind ("C-c n c" . org-roam-capture)
+  :bind ("C-c n l" . org-roam-buffer-toggle)
+  :bind ("C-c n g" . org-roam-graph)
+  :bind ("C-c n d" . org-roam-dailies-capture-today)
+  :config
+  (unless (file-directory-p org-roam-directory)
+    (make-directory org-roam-directory t))
+  (org-roam-db-autosync-mode)
+
+  ;; Evil leader bindings for quick access in normal/motion/visual modes.
+  (evil-define-key 'normal 'global (kbd "SPC n f") #'org-roam-node-find)
+  (evil-define-key 'normal 'global (kbd "SPC n c") #'org-roam-capture)
+  (evil-define-key 'normal 'global (kbd "SPC n i") #'org-roam-node-insert)
+  (evil-define-key 'normal 'global (kbd "SPC n l") #'org-roam-buffer-toggle)
+  (evil-define-key 'normal 'global (kbd "SPC n g") #'org-roam-graph)
+  (evil-define-key 'normal 'global (kbd "SPC n d") #'org-roam-dailies-capture-today)
+  (evil-define-key 'motion 'global (kbd "SPC n f") #'org-roam-node-find)
+  (evil-define-key 'motion 'global (kbd "SPC n c") #'org-roam-capture)
+  (evil-define-key 'motion 'global (kbd "SPC n i") #'org-roam-node-insert)
+  (evil-define-key 'motion 'global (kbd "SPC n l") #'org-roam-buffer-toggle)
+  (evil-define-key 'motion 'global (kbd "SPC n g") #'org-roam-graph)
+  (evil-define-key 'motion 'global (kbd "SPC n d") #'org-roam-dailies-capture-today))

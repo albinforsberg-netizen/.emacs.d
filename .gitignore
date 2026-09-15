@@ -1,0 +1,16 @@
+# Emacs local state
+auto-save-list/
+eln-cache/
+transient/
+elpa/
+
+# Timeclock data and generated session files
+# Keep project data local to the machine
+/timeclock/
+*.eld
+*.org~
+*.el~
+*.txt~
+
+# OS/editor noise
+.DS_Store
