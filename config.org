@@ -1,0 +1,148 @@
+#+TITLE: Emacs Configuration
+#+AUTHOR: Albin
+#+PROPERTY: header-args:emacs-lisp :tangle yes :results silent
+#+STARTUP: showeverything
+
+This file is tangled into =config.el= by =init.el= on startup. The goal is
+to stay as close to vanilla Emacs as reasonably possible, and to run
+unmodified on macOS, Linux and Windows. Every non-default behaviour should
+be justified by a heading below rather than buried in a single flat file.
+
+* Package Management
+
+We use the built-in =package.el= together with the built-in (Emacs 29+)
+=use-package= macro. No third-party bootstrapper (straight.el, elpaca, ...)
+is used, so a fresh checkout of this config needs nothing but Emacs itself
+and a network connection on first run.
+
+#+begin_src emacs-lisp
+(require 'package)
+
+(setq package-archives
+      '(("gnu"    . "https://elpa.gnu.org/packages/")
+        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+        ("melpa"  . "https://melpa.org/packages/"))
+      package-archive-priorities
+      '(("gnu"    . 3)
+        ("nongnu" . 2)
+        ("melpa"  . 1)))
+
+(package-initialize)
+
+(unless package-archive-contents
+  (package-refresh-contents))
+
+(require 'use-package)
+(setq use-package-always-ensure t
+      use-package-verbose nil)
+#+end_src
+
+* Startup
+
+Restore a sane garbage-collection threshold now that startup is done (it was
+raised in =early-init.el= for speed).
+
+#+begin_src emacs-lisp
+(add-hook 'emacs-startup-hook
+          (lambda ()
+            (setq gc-cons-threshold (* 32 1024 1024) ; 32MB
+                  gc-cons-percentage 0.1)))
+#+end_src
+
+* Evil Mode
+
+Evil brings modal (vim-style) editing to Emacs. We stick close to evil's own
+defaults for now; deeper integration with built-in modes (dired, magit,
+etc.) can be layered on later via =evil-collection= if wanted.
+
+#+begin_src emacs-lisp
+(use-package evil
+  :init
+  ;; These must be set before evil loads.
+  (setq evil-want-integration t    ; integrate with other built-in packages
+        evil-want-keybinding nil   ; leave keybinding setup to evil-collection, if added later
+        evil-want-C-u-scroll t     ; C-u scrolls up, vim-style, instead of universal-argument
+        evil-want-C-i-jump nil     ; keep TAB usable normally (e.g. in Org)
+        evil-undo-system 'undo-redo) ; use Emacs's native undo-redo (28+)
+  :config
+  (evil-mode 1)
+
+  ;; Escape should quit most transient states, vim-style.
+  (define-key evil-normal-state-map (kbd "<escape>") 'keyboard-quit)
+  (define-key evil-visual-state-map (kbd "<escape>") 'keyboard-quit)
+  (define-key minibuffer-local-map (kbd "<escape>") 'keyboard-quit))
+#+end_src
+
+* Which-Key
+
+Which-key pops up a hint window listing possible completions whenever a key
+sequence is left hanging (e.g. after a prefix key). It isn't vim-specific,
+but pairs well with evil once leader-key bindings are added.
+
+#+begin_src emacs-lisp
+(use-package which-key
+  :init
+  (setq which-key-idle-delay 0.2)
+  :config
+  (which-key-mode 1))
+#+end_src
+
+* Version Control (Magit)
+
+Magit replaces the built-in (rudimentary) VC front-end with a much richer
+interface. Magit is known to be noticeably slower on Windows than on
+macOS/Linux, almost entirely because of how slow spawning git subprocesses
+is there by default. The settings below are well-known, safe mitigations
+for that; they don't change behaviour on macOS/Linux.
+
+#+begin_src emacs-lisp
+;; vc.el shells out to git on its own (e.g. for the mode-line VC segment, or
+;; on every file save/visit) *in addition* to whatever Magit does. That's
+;; redundant work Magit already covers, and it's costly everywhere but
+;; especially so on Windows where each subprocess spawn is slow.
+(setq vc-handled-backends (delq 'Git vc-handled-backends))
+
+;; Emacs's default pipe settings badly throttle subprocess I/O on Windows
+;; (git writes many small chunks, and the default read delay serializes
+;; them). Raising the buffer size and removing the read delay is the
+;; single biggest known fix for "Magit feels slow on Windows".
+(when (eq system-type 'windows-nt)
+  (setq w32-pipe-read-delay 0
+        w32-pipe-buffer-size (* 64 1024)))
+
+(use-package magit
+  :bind (("C-x g" . magit-status))
+  :config
+  ;; Fetching Gravatar images for the log/revision buffers blocks on the
+  ;; network; skip it.
+  (setq magit-revision-show-gravatars nil)
+  ;; Don't compute/show a diff every time the commit buffer opens; view it
+  ;; on demand instead. Cheaper, especially on larger repos.
+  (setq magit-commit-show-diff nil))
+#+end_src
+
+* Timeclock
+
+A personal time-tracking library ([[file:lisp/albin-timeclock.el]]), predating
+this config. It provides profile-based clock in/out, a transient menu bound
+to =C-c t=, Swedish public holiday handling, daily/weekly summaries, CSV
+export, and an automatic git backup of its data files on exit. It depends
+on Org and the built-in =timeclock= library (both already available),
+=transient= (installed above as a dependency of Magit), and =nerd-icons=
+for menu icons.
+
+It lives in =lisp/= rather than directly under =user-emacs-directory=: Emacs
+warns at startup if =user-emacs-directory= itself ends up on =load-path=
+(it can shadow other files sitting there, like the tangled =config.el= or
+package.el's =elpa/= directory), so a subdirectory is the recommended
+place for local, non-package elisp.
+
+#+begin_src emacs-lisp
+(use-package nerd-icons)
+
+(add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
+(require 'albin-timeclock)
+#+end_src
+
+Run =M-x nerd-icons-install-fonts= once on each machine (macOS/Linux/
+Windows) so the icons used by the timeclock menu render correctly.
