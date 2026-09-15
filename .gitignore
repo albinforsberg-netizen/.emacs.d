@@ -5,6 +5,9 @@ transient/
 elpa/
 elpaca/
 url/
+backups/
+autosaves/
+state/
 
 # Timeclock data and generated session files
 # Keep project data local to the machine

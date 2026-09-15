@@ -8,9 +8,13 @@
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6)
 
-;; We call (package-initialize) ourselves from config.org, once
-;; package-archives has been configured.
+;; Elpaca manages packages from config.org; prevent package.el from
+;; initializing its own package system during startup.
 (setq package-enable-at-startup nil)
+
+;; Elpaca may native-compile packages during first install. Their compiler
+;; warnings are not startup errors and should not interrupt the first run.
+(setq native-comp-async-report-warnings-errors nil)
 
 ;; Avoid a flash of unstyled UI chrome on graphical frames. These are no-ops
 ;; on a terminal, so this is safe on macOS, Linux and Windows alike.
