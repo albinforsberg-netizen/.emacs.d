@@ -4,6 +4,7 @@ eln-cache/
 transient/
 elpa/
 elpaca/
+url/
 
 # Timeclock data and generated session files
 # Keep project data local to the machine
@@ -12,6 +13,8 @@ elpaca/
 *.org~
 *.el~
 *.txt~
+
+config.el
 
 # OS/editor noise
 .DS_Store
