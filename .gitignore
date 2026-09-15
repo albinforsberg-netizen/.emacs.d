@@ -1,25 +1,8 @@
-# Emacs local state
-auto-save-list/
-eln-cache/
-transient/
-elpa/
-elpaca/
-url/
-backups/
-autosaves/
-state/
-
-# Timeclock data and generated session files
-# Keep project data local to the machine
-/timeclock/
-*.eld
-*.org~
-*.el~
-*.txt~
-
-config.el
-
-# OS/editor noise
-.DS_Store
-
-*.db
+# Keep only the essential Emacs configuration source files in Git.
+*
+!.gitignore
+!init.el
+!config.org
+!early-init.el
+!lisp/
+!lisp/**

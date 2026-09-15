@@ -29,25 +29,28 @@ macro used throughout this config.
                               :files (:defaults "elpaca-test.el" (:exclude "extensions"))
                               :build (:not elpaca-activate)))
 
-(let* ((repo  (expand-file-name "elpaca/" elpaca-sources-directory))
+(let* ((repo (expand-file-name "elpaca/" elpaca-sources-directory))
        (build (expand-file-name "elpaca/" elpaca-builds-directory))
        (order (cdr elpaca-order))
        (default-directory repo))
   (add-to-list 'load-path (if (file-exists-p build) build repo))
   (unless (file-exists-p repo)
     (make-directory repo t)
-    (when (<= emacs-major-version 28) (require 'subr-x))
     (condition-case-unless-debug err
         (if-let* ((buffer (pop-to-buffer-same-window "*elpaca-bootstrap*"))
-                  ((zerop (apply #'call-process `("git" nil ,buffer t "clone"
-                                                  ,@(when-let* ((depth (plist-get order :depth)))
-                                                      (list (format "--depth=%d" depth) "--no-single-branch"))
-                                                  ,(plist-get order :repo) ,repo))))
+                  ((zerop (apply #'call-process
+                                 `("git" nil ,buffer t "clone"
+                                   ,@(when-let* ((depth (plist-get order :depth)))
+                                       (list (format "--depth=%d" depth)
+                                             "--no-single-branch"))
+                                   ,(plist-get order :repo) ,repo))))
                   ((zerop (call-process "git" nil buffer t "checkout"
                                         (or (plist-get order :ref) "--"))))
                   (emacs (concat invocation-directory invocation-name))
-                  ((zerop (call-process emacs nil buffer nil "-Q" "-L" "." "--batch"
-                                        "--eval" "(byte-recompile-directory \".\" 0 'force)")))
+                  ((zerop (call-process emacs nil buffer nil "-Q" "-L" "."
+                                        "--batch"
+                                        "--eval"
+                                        "(byte-recompile-directory \".\" 0 'force)")))
                   ((require 'elpaca))
                   ((elpaca-generate-autoloads "elpaca" repo)))
             (progn (message "%s" (buffer-string)) (kill-buffer buffer))
@@ -56,15 +59,19 @@ macro used throughout this config.
   (unless (require 'elpaca-autoloads nil t)
     (require 'elpaca)
     (elpaca-generate-autoloads "elpaca" repo)
-    (let ((load-source-file-function nil)) (load "./elpaca-autoloads"))))
+    (let ((load-source-file-function nil))
+      (load "./elpaca-autoloads"))))
 (add-hook 'after-init-hook #'elpaca-process-queues)
 (elpaca `(,@elpaca-order))
 
-;; Install the use-package integration for Elpaca.
-;; Do not call (require 'elpaca-use-package) here; install it via Elpaca
-;; itself and only then enable the integration mode.
-(elpaca elpaca-use-package
+;; Activate Elpaca's use-package integration before package declarations run.
+(elpaca (elpaca-use-package :wait t)
   (elpaca-use-package-mode))
+
+;; Compat is required by Magit, Org Roam, and several transitive packages.
+;; Queue it once before any package declarations so fresh installs resolve
+;; the dependency without duplicate Elpaca orders.
+(elpaca (compat :wait t))
 
 (setq use-package-always-ensure t
       use-package-verbose nil)
@@ -165,6 +172,11 @@ but pairs well with evil once leader-key bindings are added.
     "<leader>" "Leader"
     "<leader>g" "Git / Magit"
     "<leader>gg" "Status"
+    "<leader>p" "Project"
+    "<leader>pp" "Switch project"
+    "<leader>pf" "Find project file"
+    "<leader>pb" "Switch project buffer"
+    "<leader>pc" "Compile project"
     "<leader>n" "Org Roam"
     "<leader>nf" "Find node"
     "<leader>nc" "Capture"
@@ -205,12 +217,16 @@ completion workflow for minibuffers and in-buffer text.
 
 (use-package corfu
   :demand t
+  :ensure (:wait t)
   :init
   (setq corfu-auto t
         corfu-cycle t
-        corfu-preselect 'prompt)
+    corfu-preselect 'prompt
+    corfu-auto-prefix 1)
   :config
   (global-corfu-mode 1))
+
+(global-set-key (kbd "C-M-i") #'completion-at-point)
 #+end_src
 
 * Projects
@@ -218,31 +234,42 @@ completion workflow for minibuffers and in-buffer text.
 Use Emacs's built-in project management with a small, discoverable prefix.
 
 #+begin_src emacs-lisp
-(require 'project)
+(use-package project
+  :ensure nil
+  :demand t
+  :init
+  (setq project-vc-extra-root-markers
+        '(".git" "package.json" "tsconfig.json" "Cargo.toml" "go.mod"
+          "pyproject.toml" "setup.py"))
+  :bind-keymap
+  ("C-c p" . project-prefix-map)
+  :config
+  (setq project-switch-commands
+        '((project-find-file "Find file")
+          (project-dired "Dired")
+          (project-switch-to-buffer "Switch buffer")
+          (project-eshell "Eshell")
+          (project-compile "Compile")))
 
-(setq project-switch-commands
-      '((project-find-file "Find file")
-        (project-dired "Dired")
-        (project-eshell "Eshell")
-        (project-compile "Compile")))
-
-(global-set-key (kbd "C-c p") project-prefix-map)
+  (with-eval-after-load 'evil
+    (evil-define-key 'normal 'global (kbd "<leader>pp") #'project-switch-project)
+    (evil-define-key 'normal 'global (kbd "<leader>pf") #'project-find-file)
+    (evil-define-key 'normal 'global (kbd "<leader>pb") #'project-switch-to-buffer)
+    (evil-define-key 'normal 'global (kbd "<leader>pc") #'project-compile)
+    (evil-define-key 'motion 'global (kbd "<leader>pp") #'project-switch-project)
+    (evil-define-key 'motion 'global (kbd "<leader>pf") #'project-find-file)
+    (evil-define-key 'motion 'global (kbd "<leader>pb") #'project-switch-to-buffer)
+    (evil-define-key 'motion 'global (kbd "<leader>pc") #'project-compile)))
 #+end_src
 
 * Language Servers
 
-Eglot is built in on recent Emacs versions. It starts language servers when
-entering supported buffers, but does not install a server for a language.
+LSP and language-server setup lives in [[file:lisp/albin-lsp.el]] so it can be
+managed independently from the rest of this configuration.
 
 #+begin_src emacs-lisp
-(use-package eglot
-  :ensure nil
-  :hook ((python-mode . eglot-ensure)
-         (js-mode . eglot-ensure)
-         (go-mode . eglot-ensure)
-         (rust-mode . eglot-ensure))
-  :init
-  (setq eglot-autoshutdown t))
+(add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
+(require 'albin-lsp)
 #+end_src
 
 * Interface
@@ -283,7 +310,10 @@ buffer instead of requiring a manual inspection of the startup messages.
            ("Org capture templates" . ,(and (boundp 'org-capture-templates)
                                              (= 3 (length org-capture-templates))))
            ("Project management" . ,(featurep 'project))
-           ("Eglot" . ,(featurep 'eglot)))))
+           ("LSP Mode" . ,(featurep 'lsp-mode))
+           ("LSP UI" . ,(featurep 'lsp-ui))
+           ("LSP language servers" . ,(and (fboundp 'albin/lsp--missing-servers)
+                                            (null (albin/lsp--missing-servers))))))
     (with-current-buffer (get-buffer-create "*Albin Config Health*")
       (erase-buffer)
       (insert "Configuration health check\n\n")
@@ -293,7 +323,7 @@ buffer instead of requiring a manual inspection of the startup messages.
                         (car check)
                         (if (cdr check) "ready" "missing"))))
       (goto-char (point-min))
-      (display-buffer (current-buffer)))))
+      (display-buffer (current-buffer))))))
 
 (global-set-key (kbd "C-c h") #'albin/config-health-check)
 #+end_src
@@ -320,12 +350,6 @@ for that; they don't change behaviour on macOS/Linux.
 (when (eq system-type 'windows-nt)
   (setq w32-pipe-read-delay 0
         w32-pipe-buffer-size (* 64 1024)))
-
-;; `compat' is a transitive dependency for Magit, Magit-Section, Org Roam,
-;; and related packages; install it early so Elpaca can resolve the chain.
-(use-package compat
-  :ensure t
-  :demand t)
 
 (use-package magit
   :bind (("C-x g" . magit-status))
