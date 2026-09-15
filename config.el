@@ -1,28 +1,49 @@
-(require 'package)
+(defvar elpaca-installer-version 0.12)
+(defvar elpaca-directory (expand-file-name "elpaca/" user-emacs-directory))
+(defvar elpaca-builds-directory (expand-file-name "builds/" elpaca-directory))
+(defvar elpaca-sources-directory (expand-file-name "sources/" elpaca-directory))
+(defvar elpaca-order '(elpaca :repo "https://github.com/progfolio/elpaca.git"
+                              :ref nil :depth 1 :inherit ignore
+                              :files (:defaults "elpaca-test.el" (:exclude "extensions"))
+                              :build (:not elpaca-activate)))
 
-(setq package-archives
-      '(("gnu"    . "https://elpa.gnu.org/packages/")
-        ("nongnu" . "https://elpa.nongnu.org/nongnu/")
-        ("melpa"  . "https://melpa.org/packages/"))
-      package-archive-priorities
-      '(("gnu"    . 3)
-        ("nongnu" . 2)
-        ("melpa"  . 1)))
+(let* ((repo  (expand-file-name "elpaca/" elpaca-sources-directory))
+       (build (expand-file-name "elpaca/" elpaca-builds-directory))
+       (order (cdr elpaca-order))
+       (default-directory repo))
+  (add-to-list 'load-path (if (file-exists-p build) build repo))
+  (unless (file-exists-p repo)
+    (make-directory repo t)
+    (when (<= emacs-major-version 28) (require 'subr-x))
+    (condition-case-unless-debug err
+        (if-let* ((buffer (pop-to-buffer-same-window "*elpaca-bootstrap*"))
+                  ((zerop (apply #'call-process `("git" nil ,buffer t "clone"
+                                                  ,@(when-let* ((depth (plist-get order :depth)))
+                                                      (list (format "--depth=%d" depth) "--no-single-branch"))
+                                                  ,(plist-get order :repo) ,repo))))
+                  ((zerop (call-process "git" nil buffer t "checkout"
+                                        (or (plist-get order :ref) "--"))))
+                  (emacs (concat invocation-directory invocation-name))
+                  ((zerop (call-process emacs nil buffer nil "-Q" "-L" "." "--batch"
+                                        "--eval" "(byte-recompile-directory \".\" 0 'force)")))
+                  ((require 'elpaca))
+                  ((elpaca-generate-autoloads "elpaca" repo)))
+            (progn (message "%s" (buffer-string)) (kill-buffer buffer))
+          (error "%s" (with-current-buffer buffer (buffer-string))))
+      ((error) (warn "%s" err) (delete-directory repo 'recursive))))
+  (unless (require 'elpaca-autoloads nil t)
+    (require 'elpaca)
+    (elpaca-generate-autoloads "elpaca" repo)
+    (let ((load-source-file-function nil)) (load "./elpaca-autoloads"))))
+(add-hook 'after-init-hook #'elpaca-process-queues)
+(elpaca `(,@elpaca-order))
 
-(package-initialize)
+;; Install the use-package integration for Elpaca.
+;; Do not call (require 'elpaca-use-package) here; install it via Elpaca
+;; itself and only then enable the integration mode.
+(elpaca elpaca-use-package
+  (elpaca-use-package-mode))
 
-;; Don't block startup forever if ELPA is unreachable or slow. If the
-;; refresh hangs, we keep going and let `use-package`/`package-install`
-;; retry later on demand instead.
-(when (null package-archive-contents)
-  (condition-case err
-      (with-timeout (15
-                     (message "Timed out contacting ELPA; continuing without package refresh."))
-        (package-refresh-contents))
-    (error
-     (message "Package refresh skipped: %s" err))))
-
-(require 'use-package)
 (setq use-package-always-ensure t
       use-package-verbose nil)
 
@@ -48,10 +69,22 @@
   (define-key minibuffer-local-map (kbd "<escape>") 'keyboard-quit))
 
 (use-package which-key
+  :ensure t
+  :demand t
   :init
-  (setq which-key-idle-delay 0.2)
+  (setq which-key-idle-delay 0.2
+        which-key-prefix-prefix "◦ ")
   :config
-  (which-key-mode 1))
+  (which-key-mode 1)
+  (which-key-add-key-based-replacements
+    "<leader>" "Leader"
+    "<leader>n" "Org Roam"
+    "<leader>nf" "Find node"
+    "<leader>nc" "Capture"
+    "<leader>ni" "Insert node"
+    "<leader>nl" "Toggle roam buffer"
+    "<leader>ng" "Graph"
+    "<leader>nd" "Daily note"))
 
 ;; vc.el shells out to git on its own (e.g. for the mode-line VC segment, or
 ;; on every file save/visit) *in addition* to whatever Magit does. That's
@@ -67,6 +100,12 @@
   (setq w32-pipe-read-delay 0
         w32-pipe-buffer-size (* 64 1024)))
 
+;; `compat' is a transitive dependency for Magit, Magit-Section, Org Roam,
+;; and related packages; install it early so Elpaca can resolve the chain.
+(use-package compat
+  :ensure t
+  :demand t)
+
 (use-package magit
   :bind (("C-x g" . magit-status))
   :config
@@ -77,13 +116,16 @@
   ;; on demand instead. Cheaper, especially on larger repos.
   (setq magit-commit-show-diff nil))
 
-(use-package nerd-icons)
+(use-package nerd-icons
+  :ensure t
+  :demand t)
 
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 (require 'albin-timeclock)
 
 (use-package org-roam
   :ensure t
+  :demand t
   :after org
   :init
   (setq org-roam-v2-ack t
@@ -106,16 +148,18 @@
     (make-directory org-roam-directory t))
   (org-roam-db-autosync-mode)
 
-  ;; Evil leader bindings for quick access in normal/motion/visual modes.
-  (evil-define-key 'normal 'global (kbd "SPC n f") #'org-roam-node-find)
-  (evil-define-key 'normal 'global (kbd "SPC n c") #'org-roam-capture)
-  (evil-define-key 'normal 'global (kbd "SPC n i") #'org-roam-node-insert)
-  (evil-define-key 'normal 'global (kbd "SPC n l") #'org-roam-buffer-toggle)
-  (evil-define-key 'normal 'global (kbd "SPC n g") #'org-roam-graph)
-  (evil-define-key 'normal 'global (kbd "SPC n d") #'org-roam-dailies-capture-today)
-  (evil-define-key 'motion 'global (kbd "SPC n f") #'org-roam-node-find)
-  (evil-define-key 'motion 'global (kbd "SPC n c") #'org-roam-capture)
-  (evil-define-key 'motion 'global (kbd "SPC n i") #'org-roam-node-insert)
-  (evil-define-key 'motion 'global (kbd "SPC n l") #'org-roam-buffer-toggle)
-  (evil-define-key 'motion 'global (kbd "SPC n g") #'org-roam-graph)
-  (evil-define-key 'motion 'global (kbd "SPC n d") #'org-roam-dailies-capture-today))
+  ;; Evil leader bindings: define the leader prefix and bind keys under it.
+  (evil-set-leader 'normal (kbd "SPC"))
+  (evil-set-leader 'motion (kbd "SPC"))
+  (evil-define-key 'normal 'global (kbd "<leader>nf") #'org-roam-node-find)
+  (evil-define-key 'normal 'global (kbd "<leader>nc") #'org-roam-capture)
+  (evil-define-key 'normal 'global (kbd "<leader>ni") #'org-roam-node-insert)
+  (evil-define-key 'normal 'global (kbd "<leader>nl") #'org-roam-buffer-toggle)
+  (evil-define-key 'normal 'global (kbd "<leader>ng") #'org-roam-graph)
+  (evil-define-key 'normal 'global (kbd "<leader>nd") #'org-roam-dailies-capture-today)
+  (evil-define-key 'motion 'global (kbd "<leader>nf") #'org-roam-node-find)
+  (evil-define-key 'motion 'global (kbd "<leader>nc") #'org-roam-capture)
+  (evil-define-key 'motion 'global (kbd "<leader>ni") #'org-roam-node-insert)
+  (evil-define-key 'motion 'global (kbd "<leader>nl") #'org-roam-buffer-toggle)
+  (evil-define-key 'motion 'global (kbd "<leader>ng") #'org-roam-graph)
+  (evil-define-key 'motion 'global (kbd "<leader>nd") #'org-roam-dailies-capture-today))

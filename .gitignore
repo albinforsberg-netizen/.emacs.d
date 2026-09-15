@@ -3,6 +3,7 @@ auto-save-list/
 eln-cache/
 transient/
 elpa/
+elpaca/
 
 # Timeclock data and generated session files
 # Keep project data local to the machine
@@ -14,3 +15,5 @@ elpa/
 
 # OS/editor noise
 .DS_Store
+
+*.db
